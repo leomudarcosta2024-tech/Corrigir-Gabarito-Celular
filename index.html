@@ -20,7 +20,6 @@
         .btn-start { background-color: #28a745; }
         .btn-stop { background-color: #dc3545; }
         
-        /* Estilos dos botões principais de ação */
         .btn-foto { background-color: #ff9800; color: #000; display: none; font-size: 18px; padding: 15px 25px; width: 90%; max-width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .btn-nova { background-color: #17a2b8; display: none; font-size: 18px; padding: 15px 25px; width: 90%; max-width: 300px; }
 
@@ -73,7 +72,7 @@
         let streaming = false;
         let opencvCarregado = false;
         let stream = null;
-        let modoFotoTirada = false; // Controla se estamos na mira ou vendo o resultado
+        let modoFotoTirada = false;
         let loopMira = null;
 
         function cvPronto() {
@@ -84,24 +83,13 @@
         }
 
         btnCamera.addEventListener('click', () => {
-            if (!streaming) {
-                iniciarCamera();
-            } else {
-                pararCamera();
-            }
+            if (!streaming) iniciarCamera();
+            else pararCamera();
         });
-
-        // ==========================================
-        //  CONTROLES DA CÂMERA E MIRA
-        // ==========================================
 
         function iniciarCamera() {
             divResultado.innerText = "Ligando câmera...";
-            
-            let constraints = { 
-                video: { facingMode: { ideal: "environment" } }, 
-                audio: false 
-            };
+            let constraints = { video: { facingMode: { ideal: "environment" } }, audio: false };
             
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(s) {
@@ -117,7 +105,6 @@
 
         function aguardarLentePronta() {
             if (streaming) return; 
-            
             if (video.videoWidth > 0 && video.videoHeight > 0) {
                 streaming = true;
                 btnCamera.innerText = "Desligar Câmera";
@@ -126,10 +113,10 @@
                 
                 divResultado.innerText = "Alinhe o gabarito e tire a foto!";
                 modoFotoTirada = false;
-                btnTirarFoto.style.display = "block"; // Exibe o botão de tirar foto
+                btnTirarFoto.style.display = "block";
                 btnNovaFoto.style.display = "none";
                 
-                desenharMira(); // Começa a atualizar a tela em tempo real
+                desenharMira();
             } else {
                 setTimeout(aguardarLentePronta, 100);
             }
@@ -138,9 +125,8 @@
         function pararCamera() {
             streaming = false;
             if (loopMira) cancelAnimationFrame(loopMira);
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            
             btnCamera.innerText = "Ligar Câmera";
             btnCamera.classList.remove('btn-stop');
             btnCamera.classList.add('btn-start');
@@ -150,7 +136,6 @@
             divResultado.innerText = "Câmera parada.";
         }
 
-        // Esta função apenas desenha o vídeo e o quadrado verde (sem OpenCV, super leve)
         function desenharMira() {
             if (!streaming || modoFotoTirada) return;
 
@@ -159,10 +144,8 @@
                 canvas.height = video.videoHeight;
             }
 
-            // 1. Pinta o vídeo no quadro
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // 2. Calcula e desenha o quadrado verde da mira
             let larguraPercentual = 0.85; 
             let alturaPercentual = 0.65;  
             let boxWidth = Math.floor(canvas.width * larguraPercentual);
@@ -170,48 +153,34 @@
             let startX = Math.floor((canvas.width - boxWidth) / 2);
             let startY = Math.floor((canvas.height - boxHeight) / 2);
 
-            ctx.strokeStyle = '#00FF00'; // Verde
+            ctx.strokeStyle = '#00FF00';
             ctx.lineWidth = 4;
             ctx.strokeRect(startX, startY, boxWidth, boxHeight);
 
-            // Fica repetindo infinitamente até tirar a foto
             loopMira = requestAnimationFrame(desenharMira);
         }
-
-        // ==========================================
-        //  AÇÃO DOS BOTÕES DE FOTO
-        // ==========================================
 
         btnNovaFoto.addEventListener('click', () => {
             modoFotoTirada = false;
             btnTirarFoto.style.display = "block";
             btnNovaFoto.style.display = "none";
             divResultado.innerText = "Alinhe o gabarito e tire a foto!";
-            desenharMira(); // Volta a exibir a câmera ao vivo
+            desenharMira();
         });
 
         btnTirarFoto.addEventListener('click', () => {
-            modoFotoTirada = true; // Trava a tela do canvas (congela a imagem)
-            btnTirarFoto.style.display = "none"; // Esconde o botão de tirar foto
+            modoFotoTirada = true;
+            btnTirarFoto.style.display = "none";
             divResultado.innerHTML = "<strong>Processando foto, aguarde...</strong>";
-            
-            // Dá um pequeno atraso só pro navegador conseguir mostrar o texto "Processando..."
             setTimeout(processarFotoCongelada, 50); 
         });
 
-        // ==========================================
-        //  PROCESSAMENTO COM OPENCV (RODA 1 VEZ SÓ)
-        // ==========================================
-
         function processarFotoCongelada() {
-            // Matrizes do OpenCV para rodar a correção
             let src = null; let roiSrc = null; let gray = null; let blur = null; let thresh = null; 
             let contours = null; let hierarchy = null; let kernelMorfologico = null;
 
             try {
-                // Lê a foto exata que ficou congelada no Canvas
                 src = cv.imread(canvas);
-
                 if (src.cols === 0 || src.rows === 0) throw new Error("Falha ao capturar foto.");
 
                 let larguraPercentual = 0.85; 
@@ -221,7 +190,6 @@
                 let startX = Math.floor((src.cols - boxWidth) / 2);
                 let startY = Math.floor((src.rows - boxHeight) / 2);
 
-                // Proteção contra vazamento de margem (M12)
                 if (startX < 0) startX = 0; if (startY < 0) startY = 0;
                 if (startX + boxWidth > src.cols) boxWidth = src.cols - startX;
                 if (startY + boxHeight > src.rows) boxHeight = src.rows - startY;
@@ -242,17 +210,32 @@
                 cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let manchasValidas = [];
-                let limiteAreaMinima = 80;
+                
+                // ==========================================
+                // NOVO: LÓGICA ANTI-LETRAS E SUJEIRAS
+                // ==========================================
+                let areaTotalCaixa = boxWidth * boxHeight;
+                
+                // Dinâmico: 0.1% do tamanho da caixa, mas no mínimo 180 pixels.
+                let limiteAreaMinima = Math.max(180, areaTotalCaixa * 0.001); 
+                
+                // Limite máximo para evitar pegar folhas inteiras ou sombras gigantes
+                let limiteAreaMaxima = areaTotalCaixa * 0.10; 
 
                 for (let i = 0; i < contours.size(); ++i) {
                     let cnt = contours.get(i);
                     let area = cv.contourArea(cnt);
-                    if (area > limiteAreaMinima) {
+                    
+                    if (area > limiteAreaMinima && area < limiteAreaMaxima) {
                         let rect = cv.boundingRect(cnt);
-                        if (rect.width > boxWidth * 0.90 || rect.height > boxHeight * 0.30) continue; 
+                        
+                        // Descarta sujeiras que são muito estreitas ou muito finas (riscos e letras)
+                        if (rect.width < 12 || rect.height < 12) continue;
+                        
                         manchasValidas.push({ rect: rect, cx: rect.x + (rect.width / 2), cy: rect.y + (rect.height / 2) });
                     }
                 }
+                // ==========================================
 
                 manchasValidas.sort((a, b) => a.cy - b.cy);
                 let linhasY = [];
@@ -303,7 +286,7 @@
                         gabaritoMarcadoPeloAluno[q] = [];
 
                         if (maiorTinta < 80) {
-                           htmlResultado += `<div class="res-item">Q${q}: <strong>Em Branco</strong></div>`;
+                           htmlResultado += `<div class="res-item">Q${q}: <strong style="color: #aaa;">Em Branco</strong></div>`;
                            continue;
                         }
 
@@ -313,6 +296,7 @@
                         
                         let textoResposta = letrasMarcadas.join(", ");
                         let statusAvaliacao = "";
+                        
                         if (modoCorrecao && gabaritoOficial[q - 1]) {
                             totalCorrigidas++;
                             let certa = gabaritoOficial[q - 1];
@@ -332,7 +316,6 @@
                     }
                     divResultado.innerHTML = htmlResultado;
 
-                    // Desenha o feedback visual na foto que fica congelada
                     cv.rectangle(src, new cv.Point(startX, startY), new cv.Point(startX + boxWidth, startY + boxHeight), new cv.Scalar(255, 255, 255, 255), 2);
                     
                     manchasValidas.forEach(m => {
@@ -351,10 +334,7 @@
                     divResultado.innerHTML = "<strong style='color:#ffc107;'>Nenhuma marcação detectada.</strong><br>O gabarito ficou fora do quadrado verde ou a foto ficou tremida. Tente novamente.";
                 }
 
-                // Pinta a foto final corrigida de volta na tela
                 cv.imshow('canvas', src);
-                
-                // Exibe o botão para tirar uma nova foto
                 btnNovaFoto.style.display = "block";
 
             } catch (err) {
@@ -362,7 +342,6 @@
                 divResultado.innerHTML = `<strong style="color:red;">Erro ao ler a foto:</strong><br>${err.message}`;
                 btnNovaFoto.style.display = "block";
             } finally {
-                // FAXINA NA MEMÓRIA PRA NÃO TRAVAR O CELULAR
                 if (src) src.delete(); if (roiSrc) roiSrc.delete(); if (gray) gray.delete(); 
                 if (blur) blur.delete(); if (thresh) thresh.delete(); if (contours) contours.delete(); 
                 if (hierarchy) hierarchy.delete(); if (kernelMorfologico) kernelMorfologico.delete();
