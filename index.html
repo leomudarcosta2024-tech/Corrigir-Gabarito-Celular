@@ -11,7 +11,7 @@
         #inputGabarito { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #555; width: 80%; max-width: 250px; text-align: center; text-transform: uppercase; }
         
         #video-container { position: relative; margin: 0 auto; width: 100%; max-width: 600px; }
-        video { display: none; } /* Escondido, usamos o canvas para desenhar por cima */
+        video { display: none; } 
         canvas { width: 100%; height: auto; border-radius: 8px; border: 2px solid #555; background-color: #000; }
         
         .btn { padding: 12px 20px; font-size: 16px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; }
@@ -45,7 +45,7 @@
         <canvas id="canvas"></canvas>
     </div>
 
-    <div id="resultado">Posicione o celular sobre o gabarito.</div>
+    <div id="resultado">Aguardando início...</div>
 
     <script>
         const video = document.getElementById('video');
@@ -78,32 +78,49 @@
         });
 
         function iniciarCamera() {
-            divResultado.innerText = "Solicitando permissão da câmera...";
-            let constraints = { video: { facingMode: "environment" }, audio: false };
+            divResultado.innerText = "Passo 1: Solicitando câmera...";
+            
+            // Usamos 'ideal' em vez de forçar, para evitar erros de restrição no Android
+            let constraints = { 
+                video: { facingMode: { ideal: "environment" } }, 
+                audio: false 
+            };
             
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(s) {
                     stream = s;
                     video.srcObject = stream;
-                    video.play();
-                    divResultado.innerText = "Câmera autorizada. Aguardando foco da lente...";
+                    
+                    // Força o play e captura erros de autoplay do navegador
+                    let playPromise = video.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(error => {
+                            console.error("Erro no autoplay do vídeo:", error);
+                        });
+                    }
+
+                    divResultado.innerText = "Passo 2: Câmera liberada. Ajustando foco da lente...";
+                    
+                    // Inicia a função "teimosa" que fica checando até a imagem aparecer
+                    aguardarLentePronta();
                 })
                 .catch(function(err) {
-                    console.error("Erro na câmera: ", err);
-                    divResultado.innerHTML = `<strong>Erro de Câmera:</strong> ${err.message || err}<br><br>Verifique se você deu permissão ou se o site está usando HTTPS (GitHub Pages).`;
+                    console.error("Erro ao pedir câmera: ", err);
+                    divResultado.innerHTML = `<strong style="color:red;">Erro de Permissão:</strong><br>${err.message || err}<br><br>Verifique se liberou a câmera no navegador.`;
                 });
         }
 
-        // Esta é a trava de segurança! Só inicia quando o vídeo realmente tiver imagem
-        video.addEventListener('canplay', () => {
-            if (!streaming) {
-                // Checa se o vídeo carregou as dimensões reais (evita crash do celular)
-                if (video.videoWidth === 0 || video.videoHeight === 0) return;
-
+        // Função "teimosa": fica rodando em loop até o vídeo ter largura e altura reais
+        function aguardarLentePronta() {
+            if (streaming) return; // Se já ligou, ignora
+            
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+                // A lente focou e a imagem chegou! Vamos montar o Canvas.
+                divResultado.innerText = "Passo 3: Lente pronta! Iniciando leitura...";
+                
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 
-                // Cria a matriz do OpenCV no tamanho exato da câmera
                 src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
                 cap = new cv.VideoCapture(video);
                 
@@ -112,9 +129,13 @@
                 btnCamera.classList.remove('btn-start');
                 btnCamera.classList.add('btn-stop');
                 
+                // Inicia o corretor
                 processarVideo();
+            } else {
+                // Tenta de novo daqui a 100 milissegundos
+                setTimeout(aguardarLentePronta, 100);
             }
-        });
+        }
 
         function pararCamera() {
             streaming = false;
@@ -131,7 +152,6 @@
             btnCamera.classList.add('btn-start');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Só muda para "Câmera parada" se não houver uma mensagem de erro sendo exibida
             if (!divResultado.innerHTML.includes("Erro")) {
                 divResultado.innerText = "Câmera parada.";
             }
@@ -141,10 +161,8 @@
             if (!streaming) return;
 
             try {
-                // Puxa o frame atual do vídeo
                 cap.read(src);
 
-                // === CONTROLE DO RETÂNGULO VERDE (Ideal para tela do M12) ===
                 let larguraPercentual = 0.85; 
                 let alturaPercentual = 0.65;  
 
@@ -153,8 +171,7 @@
                 let startX = Math.floor((video.videoWidth - boxWidth) / 2);
                 let startY = Math.floor((video.videoHeight - boxHeight) / 2);
 
-                // Proteção extra: se a matemática bugar, não quebra o código
-                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Dimensões do retângulo inválidas.");
+                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Falha no cálculo do retângulo verde.");
 
                 let rectRoi = new cv.Rect(startX, startY, boxWidth, boxHeight);
                 let corRetangulo = new cv.Scalar(0, 255, 0, 255); 
@@ -318,9 +335,8 @@
                 loopTimeout = setTimeout(processarVideo, 1000/10); 
 
             } catch (err) {
-                // SE DEU ERRO, AGORA ELE MOSTRA NA TELA EM VEZ DE SÓ DESLIGAR!
-                console.error("Erro no loop: ", err);
-                divResultado.innerHTML = `<strong style="color:red;">Erro no processamento:</strong><br>${err.message || err}<br><br>Reinicie a câmera.`;
+                console.error("Erro no processamento da imagem: ", err);
+                divResultado.innerHTML = `<strong style="color:red;">Erro na leitura:</strong><br>${err.message || err}<br><br>Reinicie a câmera.`;
                 pararCamera();
             }
         }
