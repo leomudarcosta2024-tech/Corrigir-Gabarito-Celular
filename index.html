@@ -11,7 +11,7 @@
         #inputGabarito { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #555; width: 80%; max-width: 250px; text-align: center; text-transform: uppercase; }
         
         #video-container { position: relative; margin: 0 auto; width: 100%; max-width: 600px; }
-        video { display: none; } /* Escondemos o vídeo real, mostramos só o canvas com o desenho */
+        video { display: none; } /* Escondido, usamos o canvas para desenhar por cima */
         canvas { width: 100%; height: auto; border-radius: 8px; border: 2px solid #555; background-color: #000; }
         
         .btn { padding: 12px 20px; font-size: 16px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; }
@@ -19,7 +19,7 @@
         .btn-start { background-color: #28a745; }
         .btn-stop { background-color: #dc3545; }
 
-        #resultado { margin-top: 15px; padding: 15px; background-color: #333; border-radius: 8px; font-size: 16px; text-align: left; margin: 10px auto; max-width: 90%;}
+        #resultado { margin-top: 15px; padding: 15px; background-color: #333; border-radius: 8px; font-size: 16px; text-align: left; margin: 10px auto; max-width: 90%; word-wrap: break-word;}
         .res-item { padding: 8px; border-bottom: 1px solid #555; display: flex; justify-content: space-between; }
         .correto { color: #00ff00; font-weight: bold; }
         .errado { color: #ff4444; font-weight: bold; }
@@ -41,7 +41,7 @@
     <button id="btnCamera" class="btn" disabled>Aguardando OpenCV...</button>
 
     <div id="video-container">
-        <video id="video" autoplay playsinline></video>
+        <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
     </div>
 
@@ -50,6 +50,7 @@
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const btnCamera = document.getElementById('btnCamera');
         const divResultado = document.getElementById('resultado');
         const inputGabarito = document.getElementById('inputGabarito');
@@ -77,7 +78,7 @@
         });
 
         function iniciarCamera() {
-            // Configuração para forçar a câmera traseira em celulares
+            divResultado.innerText = "Solicitando permissão da câmera...";
             let constraints = { video: { facingMode: "environment" }, audio: false };
             
             navigator.mediaDevices.getUserMedia(constraints)
@@ -85,29 +86,35 @@
                     stream = s;
                     video.srcObject = stream;
                     video.play();
-                    
-                    video.onloadedmetadata = () => {
-                        // Ajusta o tamanho do canvas para o tamanho real da câmera do celular
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        
-                        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-                        cap = new cv.VideoCapture(video);
-                        
-                        streaming = true;
-                        btnCamera.innerText = "Parar Câmera";
-                        btnCamera.classList.remove('btn-start');
-                        btnCamera.classList.add('btn-stop');
-                        
-                        // Inicia o loop de processamento
-                        processarVideo();
-                    };
+                    divResultado.innerText = "Câmera autorizada. Aguardando foco da lente...";
                 })
                 .catch(function(err) {
-                    console.error("Erro na câmera: " + err);
-                    alert("Não foi possível acessar a câmera. Verifique as permissões.");
+                    console.error("Erro na câmera: ", err);
+                    divResultado.innerHTML = `<strong>Erro de Câmera:</strong> ${err.message || err}<br><br>Verifique se você deu permissão ou se o site está usando HTTPS (GitHub Pages).`;
                 });
         }
+
+        // Esta é a trava de segurança! Só inicia quando o vídeo realmente tiver imagem
+        video.addEventListener('canplay', () => {
+            if (!streaming) {
+                // Checa se o vídeo carregou as dimensões reais (evita crash do celular)
+                if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                // Cria a matriz do OpenCV no tamanho exato da câmera
+                src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+                cap = new cv.VideoCapture(video);
+                
+                streaming = true;
+                btnCamera.innerText = "Parar Câmera";
+                btnCamera.classList.remove('btn-start');
+                btnCamera.classList.add('btn-stop');
+                
+                processarVideo();
+            }
+        });
 
         function pararCamera() {
             streaming = false;
@@ -122,37 +129,40 @@
             btnCamera.innerText = "Ligar Câmera";
             btnCamera.classList.remove('btn-stop');
             btnCamera.classList.add('btn-start');
-            ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            divResultado.innerText = "Câmera parada.";
+            
+            // Só muda para "Câmera parada" se não houver uma mensagem de erro sendo exibida
+            if (!divResultado.innerHTML.includes("Erro")) {
+                divResultado.innerText = "Câmera parada.";
+            }
         }
 
         function processarVideo() {
             if (!streaming) return;
 
             try {
+                // Puxa o frame atual do vídeo
                 cap.read(src);
 
-                // === CONTROLE DO RETÂNGULO VERDE PARA O M12 ===
-                // Mude estes valores para ajustar o tamanho da caixa de leitura!
-                let larguraPercentual = 0.85; // 85% da largura da tela
-                let alturaPercentual = 0.65;  // 65% da altura da tela
+                // === CONTROLE DO RETÂNGULO VERDE (Ideal para tela do M12) ===
+                let larguraPercentual = 0.85; 
+                let alturaPercentual = 0.65;  
 
                 let boxWidth = Math.floor(video.videoWidth * larguraPercentual);
                 let boxHeight = Math.floor(video.videoHeight * alturaPercentual);
                 let startX = Math.floor((video.videoWidth - boxWidth) / 2);
                 let startY = Math.floor((video.videoHeight - boxHeight) / 2);
 
-                // Define a Região de Interesse (ROI)
+                // Proteção extra: se a matemática bugar, não quebra o código
+                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Dimensões do retângulo inválidas.");
+
                 let rectRoi = new cv.Rect(startX, startY, boxWidth, boxHeight);
-                let corRetangulo = new cv.Scalar(0, 255, 0, 255); // Verde
+                let corRetangulo = new cv.Scalar(0, 255, 0, 255); 
                 
-                // Desenha a mira verde na tela inteira
                 let p1 = new cv.Point(startX, startY);
                 let p2 = new cv.Point(startX + boxWidth, startY + boxHeight);
                 cv.rectangle(src, p1, p2, corRetangulo, 3, cv.LINE_8, 0);
 
-                // Corta apenas o pedaço de dentro do quadrado verde para processar
                 let roiSrc = src.roi(rectRoi);
                 let gray = new cv.Mat();
                 let blur = new cv.Mat();
@@ -160,7 +170,6 @@
 
                 cv.cvtColor(roiSrc, gray, cv.COLOR_RGBA2GRAY, 0);
 
-                // Filtro para ignorar letras impressas e focar na tinta
                 let ksize = new cv.Size(15, 15);
                 cv.GaussianBlur(gray, blur, ksize, 0, 0, cv.BORDER_DEFAULT);
 
@@ -183,7 +192,6 @@
 
                     if (area > limiteAreaMinima) {
                         let rect = cv.boundingRect(cnt);
-                        // Filtra linhas muito compridas
                         if (rect.width > boxWidth * 0.90 || rect.height > boxHeight * 0.30) continue; 
                         
                         manchasValidas.push({ 
@@ -194,7 +202,6 @@
                     }
                 }
 
-                // Agrupamento horizontal (Questões)
                 manchasValidas.sort((a, b) => a.cy - b.cy);
                 let linhasY = [];
                 let limiteAgrupamento = (boxHeight / 11) * 0.6; 
@@ -238,7 +245,6 @@
                     }
                 });
 
-                // GERAÇÃO DOS RESULTADOS EM TEMPO REAL
                 let gabaritoOficial = inputGabarito.value.toUpperCase().replace(/[^A-D]/g, '').split('');
                 let modoCorrecao = gabaritoOficial.length > 0;
                 let htmlResultado = ``;
@@ -246,8 +252,6 @@
                 let totalCorrigidas = 0;
                 let gabaritoMarcadoPeloAluno = {};
 
-                // Só mostra o resultado se o celular achar pelo menos 3 linhas prováveis de resposta
-                // Isso evita que ele fique "piscando" lendo sujeira quando não há gabarito na tela
                 if (linhasY.length > 3) {
                     htmlResultado += `<strong>Lendo Gabarito...</strong><br><br>`;
                     
@@ -290,11 +294,9 @@
                     }
                     divResultado.innerHTML = htmlResultado;
 
-                    // Pinta de verde ou azul os quadradinhos lidos na tela para dar feedback visual
                     manchasValidas.forEach(m => {
                         if (m.questao > 10) return;
                         
-                        // Ajusta a posição de volta para a tela inteira (somando startX e startY)
                         let pM1 = new cv.Point(m.rect.x + startX, m.rect.y + startY);
                         let pM2 = new cv.Point(m.rect.x + m.rect.width + startX, m.rect.y + m.rect.height + startY);
 
@@ -309,18 +311,16 @@
                     divResultado.innerHTML = "Alinhe o gabarito no quadrado verde...";
                 }
 
-                // Mostra a imagem na tela
                 cv.imshow('canvas', src);
 
-                // Libera memória desta rodada (MUITO IMPORTANTE para o vídeo não travar)
                 roiSrc.delete(); gray.delete(); blur.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
 
-                // Chama o próximo quadro
-                loopTimeout = setTimeout(processarVideo, 1000/10); // 10 quadros por segundo para economizar bateria
+                loopTimeout = setTimeout(processarVideo, 1000/10); 
 
             } catch (err) {
+                // SE DEU ERRO, AGORA ELE MOSTRA NA TELA EM VEZ DE SÓ DESLIGAR!
                 console.error("Erro no loop: ", err);
-                divResultado.innerText = "Erro no processamento. Reinicie a câmera.";
+                divResultado.innerHTML = `<strong style="color:red;">Erro no processamento:</strong><br>${err.message || err}<br><br>Reinicie a câmera.`;
                 pararCamera();
             }
         }
