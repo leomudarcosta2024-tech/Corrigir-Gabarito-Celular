@@ -14,12 +14,13 @@
         video { display: none; } 
         canvas { width: 100%; height: auto; border-radius: 8px; border: 2px solid #555; background-color: #000; }
         
-        /* Ajuste dos botões para ficarem lado a lado e bonitos */
         .controles { margin-top: 15px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
         .btn { padding: 12px 20px; font-size: 16px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; }
         .btn:disabled { background-color: #555; color: #888; }
         .btn-start { background-color: #28a745; }
         .btn-stop { background-color: #dc3545; }
+        
+        /* Estilos dos botões principais de ação */
         .btn-foto { background-color: #ff9800; color: #000; display: none; font-size: 18px; padding: 15px 25px; width: 90%; max-width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .btn-nova { background-color: #17a2b8; display: none; font-size: 18px; padding: 15px 25px; width: 90%; max-width: 300px; }
 
@@ -56,7 +57,7 @@
         <button id="btnNovaFoto" class="btn btn-nova">🔄 Tentar Novamente</button>
     </div>
 
-    <div id="resultado">Aguardando início...</div>
+    <div id="resultado">Posicione o celular sobre o gabarito.</div>
 
     <script>
         const video = document.getElementById('video');
@@ -83,8 +84,11 @@
         }
 
         btnCamera.addEventListener('click', () => {
-            if (!streaming) iniciarCamera();
-            else pararCamera();
+            if (!streaming) {
+                iniciarCamera();
+            } else {
+                pararCamera();
+            }
         });
 
         // ==========================================
@@ -93,7 +97,11 @@
 
         function iniciarCamera() {
             divResultado.innerText = "Ligando câmera...";
-            let constraints = { video: { facingMode: { ideal: "environment" } }, audio: false };
+            
+            let constraints = { 
+                video: { facingMode: { ideal: "environment" } }, 
+                audio: false 
+            };
             
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(s) {
@@ -103,7 +111,7 @@
                     aguardarLentePronta();
                 })
                 .catch(function(err) {
-                    divResultado.innerHTML = `<strong style="color:red;">Erro:</strong> ${err.message}`;
+                    divResultado.innerHTML = `<strong style="color:red;">Erro:</strong> ${err.message || err}`;
                 });
         }
 
@@ -118,7 +126,7 @@
                 
                 divResultado.innerText = "Alinhe o gabarito e tire a foto!";
                 modoFotoTirada = false;
-                btnTirarFoto.style.display = "block";
+                btnTirarFoto.style.display = "block"; // Exibe o botão de tirar foto
                 btnNovaFoto.style.display = "none";
                 
                 desenharMira(); // Começa a atualizar a tela em tempo real
@@ -130,8 +138,9 @@
         function pararCamera() {
             streaming = false;
             if (loopMira) cancelAnimationFrame(loopMira);
-            if (stream) stream.getTracks().forEach(track => track.stop());
-            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
             btnCamera.innerText = "Ligar Câmera";
             btnCamera.classList.remove('btn-stop');
             btnCamera.classList.add('btn-start');
@@ -141,7 +150,7 @@
             divResultado.innerText = "Câmera parada.";
         }
 
-        // Esta função apenas desenha o vídeo e o quadrado verde levemente (sem OpenCV)
+        // Esta função apenas desenha o vídeo e o quadrado verde (sem OpenCV, super leve)
         function desenharMira() {
             if (!streaming || modoFotoTirada) return;
 
@@ -161,7 +170,7 @@
             let startX = Math.floor((canvas.width - boxWidth) / 2);
             let startY = Math.floor((canvas.height - boxHeight) / 2);
 
-            ctx.strokeStyle = '#00FF00';
+            ctx.strokeStyle = '#00FF00'; // Verde
             ctx.lineWidth = 4;
             ctx.strokeRect(startX, startY, boxWidth, boxHeight);
 
@@ -184,7 +193,7 @@
         btnTirarFoto.addEventListener('click', () => {
             modoFotoTirada = true; // Trava a tela do canvas (congela a imagem)
             btnTirarFoto.style.display = "none"; // Esconde o botão de tirar foto
-            divResultado.innerHTML = "<strong>Processando imagem, aguarde...</strong>";
+            divResultado.innerHTML = "<strong>Processando foto, aguarde...</strong>";
             
             // Dá um pequeno atraso só pro navegador conseguir mostrar o texto "Processando..."
             setTimeout(processarFotoCongelada, 50); 
@@ -195,12 +204,15 @@
         // ==========================================
 
         function processarFotoCongelada() {
+            // Matrizes do OpenCV para rodar a correção
             let src = null; let roiSrc = null; let gray = null; let blur = null; let thresh = null; 
             let contours = null; let hierarchy = null; let kernelMorfologico = null;
 
             try {
                 // Lê a foto exata que ficou congelada no Canvas
                 src = cv.imread(canvas);
+
+                if (src.cols === 0 || src.rows === 0) throw new Error("Falha ao capturar foto.");
 
                 let larguraPercentual = 0.85; 
                 let alturaPercentual = 0.65;  
@@ -209,7 +221,7 @@
                 let startX = Math.floor((src.cols - boxWidth) / 2);
                 let startY = Math.floor((src.rows - boxHeight) / 2);
 
-                // Proteção contra vazamento de margem
+                // Proteção contra vazamento de margem (M12)
                 if (startX < 0) startX = 0; if (startY < 0) startY = 0;
                 if (startX + boxWidth > src.cols) boxWidth = src.cols - startX;
                 if (startY + boxHeight > src.rows) boxHeight = src.rows - startY;
@@ -296,8 +308,10 @@
                         }
 
                         let letrasMarcadas = Object.keys(pixelsAlt).filter(l => pixelsAlt[l] === maiorTinta);
+                        letrasMarcadas.sort(); 
                         gabaritoMarcadoPeloAluno[q] = letrasMarcadas;
                         
+                        let textoResposta = letrasMarcadas.join(", ");
                         let statusAvaliacao = "";
                         if (modoCorrecao && gabaritoOficial[q - 1]) {
                             totalCorrigidas++;
@@ -310,15 +324,15 @@
                                 statusAvaliacao = `<span class="errado">✗ Errou (Era ${certa})</span>`;
                             }
                         }
-                        htmlResultado += `<div class="res-item">Q${q}: <strong>${letrasMarcadas.join(", ")}</strong> ${statusAvaliacao}</div>`;
+                        htmlResultado += `<div class="res-item">Q${q}: <strong>${textoResposta}</strong> ${statusAvaliacao}</div>`;
                     }
 
                     if (modoCorrecao) {
-                        htmlResultado = `<div class="placar">Nota Final: ${acertos} / ${totalCorrigidas}</div>` + htmlResultado;
+                        htmlResultado = `<div class="placar">Nota: ${acertos} / ${totalCorrigidas}</div>` + htmlResultado;
                     }
                     divResultado.innerHTML = htmlResultado;
 
-                    // Desenha o feedback visual na foto
+                    // Desenha o feedback visual na foto que fica congelada
                     cv.rectangle(src, new cv.Point(startX, startY), new cv.Point(startX + boxWidth, startY + boxHeight), new cv.Scalar(255, 255, 255, 255), 2);
                     
                     manchasValidas.forEach(m => {
@@ -334,10 +348,10 @@
                     });
 
                 } else {
-                    divResultado.innerHTML = "<strong style='color:#ffc107;'>Nenhuma marcação detectada.</strong><br>A foto ficou tremida ou fora do quadrado verde. Tente novamente.";
+                    divResultado.innerHTML = "<strong style='color:#ffc107;'>Nenhuma marcação detectada.</strong><br>O gabarito ficou fora do quadrado verde ou a foto ficou tremida. Tente novamente.";
                 }
 
-                // Pinta a foto corrigida de volta na tela
+                // Pinta a foto final corrigida de volta na tela
                 cv.imshow('canvas', src);
                 
                 // Exibe o botão para tirar uma nova foto
@@ -345,10 +359,10 @@
 
             } catch (err) {
                 console.error(err);
-                divResultado.innerHTML = `<strong style="color:red;">Erro ao processar foto:</strong><br>${err.message}`;
+                divResultado.innerHTML = `<strong style="color:red;">Erro ao ler a foto:</strong><br>${err.message}`;
                 btnNovaFoto.style.display = "block";
             } finally {
-                // FAZ A FAXINA NA MEMÓRIA PRA NÃO TRAVAR O CELULAR
+                // FAXINA NA MEMÓRIA PRA NÃO TRAVAR O CELULAR
                 if (src) src.delete(); if (roiSrc) roiSrc.delete(); if (gray) gray.delete(); 
                 if (blur) blur.delete(); if (thresh) thresh.delete(); if (contours) contours.delete(); 
                 if (hierarchy) hierarchy.delete(); if (kernelMorfologico) kernelMorfologico.delete();
