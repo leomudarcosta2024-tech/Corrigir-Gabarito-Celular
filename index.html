@@ -58,8 +58,6 @@
         let streaming = false;
         let opencvCarregado = false;
         let stream = null;
-        let src = null;
-        let cap = null;
         let loopTimeout = null;
 
         function cvPronto() {
@@ -78,9 +76,8 @@
         });
 
         function iniciarCamera() {
-            divResultado.innerText = "Passo 1: Solicitando câmera...";
+            divResultado.innerText = "Solicitando câmera...";
             
-            // Usamos 'ideal' em vez de forçar, para evitar erros de restrição no Android
             let constraints = { 
                 video: { facingMode: { ideal: "environment" } }, 
                 audio: false 
@@ -91,48 +88,31 @@
                     stream = s;
                     video.srcObject = stream;
                     
-                    // Força o play e captura erros de autoplay do navegador
                     let playPromise = video.play();
                     if (playPromise !== undefined) {
-                        playPromise.catch(error => {
-                            console.error("Erro no autoplay do vídeo:", error);
-                        });
+                        playPromise.catch(error => console.error(error));
                     }
 
-                    divResultado.innerText = "Passo 2: Câmera liberada. Ajustando foco da lente...";
-                    
-                    // Inicia a função "teimosa" que fica checando até a imagem aparecer
+                    divResultado.innerText = "Câmera liberada. Ajustando lente...";
                     aguardarLentePronta();
                 })
                 .catch(function(err) {
                     console.error("Erro ao pedir câmera: ", err);
-                    divResultado.innerHTML = `<strong style="color:red;">Erro de Permissão:</strong><br>${err.message || err}<br><br>Verifique se liberou a câmera no navegador.`;
+                    divResultado.innerHTML = `<strong style="color:red;">Erro de Permissão:</strong><br>${err.message || err}`;
                 });
         }
 
-        // Função "teimosa": fica rodando em loop até o vídeo ter largura e altura reais
         function aguardarLentePronta() {
-            if (streaming) return; // Se já ligou, ignora
+            if (streaming) return; 
             
             if (video.videoWidth > 0 && video.videoHeight > 0) {
-                // A lente focou e a imagem chegou! Vamos montar o Canvas.
-                divResultado.innerText = "Passo 3: Lente pronta! Iniciando leitura...";
-                
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                
-                src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-                cap = new cv.VideoCapture(video);
-                
                 streaming = true;
                 btnCamera.innerText = "Parar Câmera";
                 btnCamera.classList.remove('btn-start');
                 btnCamera.classList.add('btn-stop');
                 
-                // Inicia o corretor
                 processarVideo();
             } else {
-                // Tenta de novo daqui a 100 milissegundos
                 setTimeout(aguardarLentePronta, 100);
             }
         }
@@ -142,10 +122,6 @@
             if (loopTimeout) clearTimeout(loopTimeout);
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
-            }
-            if (src) {
-                src.delete();
-                src = null;
             }
             btnCamera.innerText = "Ligar Câmera";
             btnCamera.classList.remove('btn-stop');
@@ -161,17 +137,34 @@
             if (!streaming) return;
 
             try {
-                cap.read(src);
+                // Se a câmera piscar ou mudar de resolução, a gente espera ela voltar
+                if (video.videoWidth === 0 || video.videoHeight === 0) {
+                    loopTimeout = setTimeout(processarVideo, 100);
+                    return;
+                }
 
+                // Dinâmico: Se o celular mudar a resolução no meio da execução, o canvas acompanha
+                if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                }
+
+                // 1. Desenhamos o vídeo no Canvas do HTML (o navegador gerencia isso sem dar crash)
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // 2. Lemos a imagem direto do Canvas pronto e no tamanho correto
+                let src = cv.imread(canvas);
+
+                // === CONTROLE DO RETÂNGULO VERDE ===
                 let larguraPercentual = 0.85; 
                 let alturaPercentual = 0.65;  
 
-                let boxWidth = Math.floor(video.videoWidth * larguraPercentual);
-                let boxHeight = Math.floor(video.videoHeight * alturaPercentual);
-                let startX = Math.floor((video.videoWidth - boxWidth) / 2);
-                let startY = Math.floor((video.videoHeight - boxHeight) / 2);
+                let boxWidth = Math.floor(canvas.width * larguraPercentual);
+                let boxHeight = Math.floor(canvas.height * alturaPercentual);
+                let startX = Math.floor((canvas.width - boxWidth) / 2);
+                let startY = Math.floor((canvas.height - boxHeight) / 2);
 
-                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Falha no cálculo do retângulo verde.");
+                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Retângulo inválido.");
 
                 let rectRoi = new cv.Rect(startX, startY, boxWidth, boxHeight);
                 let corRetangulo = new cv.Scalar(0, 255, 0, 255); 
@@ -328,15 +321,17 @@
                     divResultado.innerHTML = "Alinhe o gabarito no quadrado verde...";
                 }
 
+                // Pinta de volta na tela!
                 cv.imshow('canvas', src);
 
-                roiSrc.delete(); gray.delete(); blur.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+                // OBRIGATÓRIO: Limpar TODAS as matrizes da memória para o celular não travar
+                src.delete(); roiSrc.delete(); gray.delete(); blur.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
 
                 loopTimeout = setTimeout(processarVideo, 1000/10); 
 
             } catch (err) {
-                console.error("Erro no processamento da imagem: ", err);
-                divResultado.innerHTML = `<strong style="color:red;">Erro na leitura:</strong><br>${err.message || err}<br><br>Reinicie a câmera.`;
+                console.error("Erro na leitura: ", err);
+                divResultado.innerHTML = `<strong style="color:red;">Erro na leitura:</strong><br>${err.message || err}`;
                 pararCamera();
             }
         }
