@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scanner de Gabarito (Ao Vivo)</title>
+    <title>Scanner Ao Vivo</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvPronto();" type="text/javascript"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background-color: #222; color: #fff; margin: 0; padding: 10px; overflow-x: hidden; }
@@ -59,6 +59,8 @@
         let opencvCarregado = false;
         let stream = null;
         let loopTimeout = null;
+        let src = null;
+        let cap = null;
 
         function cvPronto() {
             opencvCarregado = true;
@@ -76,7 +78,7 @@
         });
 
         function iniciarCamera() {
-            divResultado.innerText = "Solicitando câmera...";
+            divResultado.innerText = "Passo 1: Solicitando câmera...";
             
             let constraints = { 
                 video: { facingMode: { ideal: "environment" } }, 
@@ -93,7 +95,7 @@
                         playPromise.catch(error => console.error(error));
                     }
 
-                    divResultado.innerText = "Câmera liberada. Ajustando lente...";
+                    divResultado.innerText = "Passo 2: Câmera liberada. Aguardando a lente enviar a imagem...";
                     aguardarLentePronta();
                 })
                 .catch(function(err) {
@@ -111,6 +113,7 @@
                 btnCamera.classList.remove('btn-start');
                 btnCamera.classList.add('btn-stop');
                 
+                divResultado.innerText = "Lendo a câmera...";
                 processarVideo();
             } else {
                 setTimeout(aguardarLentePronta, 100);
@@ -122,6 +125,10 @@
             if (loopTimeout) clearTimeout(loopTimeout);
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
+            }
+            if (src) {
+                src.delete();
+                src = null;
             }
             btnCamera.innerText = "Ligar Câmera";
             btnCamera.classList.remove('btn-stop');
@@ -137,34 +144,46 @@
             if (!streaming) return;
 
             try {
-                // Se a câmera piscar ou mudar de resolução, a gente espera ela voltar
+                // Se a câmera travar por um segundo, aguardamos ela voltar
                 if (video.videoWidth === 0 || video.videoHeight === 0) {
                     loopTimeout = setTimeout(processarVideo, 100);
                     return;
                 }
 
-                // Dinâmico: Se o celular mudar a resolução no meio da execução, o canvas acompanha
-                if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                // Cria/Recria a matriz se a resolução da tela mudar (Celulares girando a tela)
+                if (!src || src.cols !== video.videoWidth || src.rows !== video.videoHeight) {
+                    if (src) src.delete();
+                    src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+                    cap = new cv.VideoCapture(video);
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                 }
 
-                // 1. Desenhamos o vídeo no Canvas do HTML (o navegador gerencia isso sem dar crash)
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                cap.read(src);
 
-                // 2. Lemos a imagem direto do Canvas pronto e no tamanho correto
-                let src = cv.imread(canvas);
+                if (src.cols === 0 || src.rows === 0) {
+                     loopTimeout = setTimeout(processarVideo, 100);
+                     return;
+                }
 
                 // === CONTROLE DO RETÂNGULO VERDE ===
                 let larguraPercentual = 0.85; 
                 let alturaPercentual = 0.65;  
 
-                let boxWidth = Math.floor(canvas.width * larguraPercentual);
-                let boxHeight = Math.floor(canvas.height * alturaPercentual);
-                let startX = Math.floor((canvas.width - boxWidth) / 2);
-                let startY = Math.floor((canvas.height - boxHeight) / 2);
+                let boxWidth = Math.floor(src.cols * larguraPercentual);
+                let boxHeight = Math.floor(src.rows * alturaPercentual);
+                let startX = Math.floor((src.cols - boxWidth) / 2);
+                let startY = Math.floor((src.rows - boxHeight) / 2);
 
-                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Retângulo inválido.");
+                // ==========================================
+                //  CAMISA DE FORÇA (A SOLUÇÃO DO BAD SIZE)
+                // ==========================================
+                // Garante que o retângulo JAMAIS vaze os limites reais da câmera do celular
+                if (startX < 0) startX = 0;
+                if (startY < 0) startY = 0;
+                if (startX + boxWidth > src.cols) boxWidth = src.cols - startX;
+                if (startY + boxHeight > src.rows) boxHeight = src.rows - startY;
+                if (boxWidth <= 0 || boxHeight <= 0) throw new Error("Câmera muito pequena.");
 
                 let rectRoi = new cv.Rect(startX, startY, boxWidth, boxHeight);
                 let corRetangulo = new cv.Scalar(0, 255, 0, 255); 
@@ -173,7 +192,7 @@
                 let p2 = new cv.Point(startX + boxWidth, startY + boxHeight);
                 cv.rectangle(src, p1, p2, corRetangulo, 3, cv.LINE_8, 0);
 
-                let roiSrc = src.roi(rectRoi);
+                let roiSrc = src.roi(rectRoi); // <--- Aqui acontecia o erro de bad size. Agora é impossível.
                 let gray = new cv.Mat();
                 let blur = new cv.Mat();
                 let thresh = new cv.Mat();
@@ -321,11 +340,9 @@
                     divResultado.innerHTML = "Alinhe o gabarito no quadrado verde...";
                 }
 
-                // Pinta de volta na tela!
                 cv.imshow('canvas', src);
 
-                // OBRIGATÓRIO: Limpar TODAS as matrizes da memória para o celular não travar
-                src.delete(); roiSrc.delete(); gray.delete(); blur.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+                roiSrc.delete(); gray.delete(); blur.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
 
                 loopTimeout = setTimeout(processarVideo, 1000/10); 
 
