@@ -210,16 +210,8 @@
                 cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let manchasValidas = [];
-                
-                // ==========================================
-                // NOVO: LÓGICA ANTI-LETRAS E SUJEIRAS
-                // ==========================================
                 let areaTotalCaixa = boxWidth * boxHeight;
-                
-                // Dinâmico: 0.1% do tamanho da caixa, mas no mínimo 180 pixels.
                 let limiteAreaMinima = Math.max(180, areaTotalCaixa * 0.001); 
-                
-                // Limite máximo para evitar pegar folhas inteiras ou sombras gigantes
                 let limiteAreaMaxima = areaTotalCaixa * 0.10; 
 
                 for (let i = 0; i < contours.size(); ++i) {
@@ -228,14 +220,10 @@
                     
                     if (area > limiteAreaMinima && area < limiteAreaMaxima) {
                         let rect = cv.boundingRect(cnt);
-                        
-                        // Descarta sujeiras que são muito estreitas ou muito finas (riscos e letras)
                         if (rect.width < 12 || rect.height < 12) continue;
-                        
                         manchasValidas.push({ rect: rect, cx: rect.x + (rect.width / 2), cy: rect.y + (rect.height / 2) });
                     }
                 }
-                // ==========================================
 
                 manchasValidas.sort((a, b) => a.cy - b.cy);
                 let linhasY = [];
@@ -247,6 +235,7 @@
                     }
                 });
 
+                // NOVO: Agora a folha armazena a Densidade (0.00 a 1.00) ao invés da quantidade bruta de pixels
                 let folhaDeRespostas = {};
                 for (let q = 1; q <= 10; q++) folhaDeRespostas[q] = { 'NUMERO': 0, 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
 
@@ -265,10 +254,19 @@
                     let tipoMancha = ['NUMERO', 'A', 'B', 'C', 'D'][indexColuna];
                     m.letra = tipoMancha;
 
-                    if (numeroQuestao <= 10) {
+                    if (numeroQuestao <= 10 && tipoMancha !== 'NUMERO') {
                         let roiTinta = thresh.roi(m.rect);
-                        folhaDeRespostas[numeroQuestao][tipoMancha] += cv.countNonZero(roiTinta);
+                        let totalTinta = cv.countNonZero(roiTinta);
+                        let areaDoQuadrado = m.rect.width * m.rect.height;
+                        
+                        // Lógica da Densidade: Divide a tinta pelo tamanho total da caixa da letra
+                        let densidade = totalTinta / areaDoQuadrado;
                         roiTinta.delete();
+
+                        // Substitui se achou algo mais preenchido na mesma letra
+                        if (densidade > folhaDeRespostas[numeroQuestao][tipoMancha]) {
+                            folhaDeRespostas[numeroQuestao][tipoMancha] = densidade;
+                        }
                     }
                 });
 
@@ -280,17 +278,20 @@
                 if (linhasY.length > 3) {
                     for (let q = 1; q <= 10; q++) {
                         let box = folhaDeRespostas[q];
-                        let pixelsAlt = { 'A': box['A'], 'B': box['B'], 'C': box['C'], 'D': box['D'] };
-                        let maiorTinta = Math.max(...Object.values(pixelsAlt));
+                        let densidadesAlt = { 'A': box['A'], 'B': box['B'], 'C': box['C'], 'D': box['D'] };
+                        let maiorDensidade = Math.max(...Object.values(densidadesAlt));
                         
                         gabaritoMarcadoPeloAluno[q] = [];
 
-                        if (maiorTinta < 80) {
+                        // NOVO LIMITE: Se nem a opção mais pintada chegou a preencher 40% (0.40) do espaço,
+                        // significa que é apenas a letra impressa no papel. Considera "Em Branco".
+                        if (maiorDensidade < 0.40) {
                            htmlResultado += `<div class="res-item">Q${q}: <strong style="color: #aaa;">Em Branco</strong></div>`;
                            continue;
                         }
 
-                        let letrasMarcadas = Object.keys(pixelsAlt).filter(l => pixelsAlt[l] === maiorTinta);
+                        // Pega todas as letras que foram pintadas com mais de 40% de densidade
+                        let letrasMarcadas = Object.keys(densidadesAlt).filter(l => densidadesAlt[l] >= 0.40);
                         letrasMarcadas.sort(); 
                         gabaritoMarcadoPeloAluno[q] = letrasMarcadas;
                         
